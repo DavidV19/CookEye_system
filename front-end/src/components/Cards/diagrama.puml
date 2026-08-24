@@ -1,0 +1,64 @@
+@startuml
+
+class Artista {
+  - idCedula : String
+  - nombres : String
+  - apellidos : String
+  - nacionalidad : String
+  - fechaNacimiento : Date
+  
+  + getObras() : List<Obra>
+}
+
+class Obra {
+  - id : String
+  - titulo : String
+  - fechaPublicacion : Date
+  - editorial : String
+  - paginas : int
+  - coleccion : String
+  - refBibliografica : String
+  - idioma : String
+  - tematica : String
+  - tecnica : String
+  - medio : String
+  - dimensiones : String
+  - enlace : String
+  - descripcion : String
+  - ambito : String
+  
+  + getArtista() : Artista
+  + getDocumentos() : List<Documento>
+  + getLugar() : LugarMuseo
+  + getCategoria() : Categoria
+}
+
+class LugarMuseo {
+  - id : String
+  - nombre : String
+  - ubicacion : String
+
+  + getObras() : List<Obra>
+}
+
+class Categoria {
+  - id : String
+  - nombre : String
+
+  + getObras() : List<Obra>
+}
+
+class Documento {
+  - id : String
+  - tipoDocumento : String
+  - docPDF : String
+
+  + getArchivo() : String
+}
+
+Artista "1" -- "*" Obra
+Categoria "1" -- "*" Obra : clasifica >
+LugarMuseo "1" -- "0..*" Obra : seExhibeEn >
+Obra "1" -- "*" Documento : contiene >
+
+@enduml

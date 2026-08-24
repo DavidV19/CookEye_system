@@ -1,0 +1,225 @@
+-- ============================================================
+--  CookEye System Database Schema
+--  Author: Da
+--  Date: 2025-10-07
+-- ============================================================
+
+-- ============================================================
+--  1. Main Table: cooking_process
+-- ============================================================
+
+CREATE TABLE cooking_process (
+    id_process            SERIAL PRIMARY KEY,
+    meat_product          TEXT NOT NULL,
+    weight_kg             REAL,
+    status                TEXT NOT NULL CHECK (status IN ('pending','active','completed','aborted')),
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    start_time            TIMESTAMP NULL,
+    elapsed_before_pause  REAL DEFAULT 0
+);
+
+CREATE INDEX idx_cooking_process_status ON cooking_process(status);
+
+
+
+-- ============================================================
+--  2. Temperature Telemetry (Lightweight Telemetry)
+-- ============================================================
+
+CREATE TABLE temperature_data (
+    id              SERIAL PRIMARY KEY,
+    process_id      INTEGER NOT NULL,
+    ts              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ambient_c       REAL NOT NULL,
+    product_c       REAL NOT NULL,
+    sample_uuid     TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (process_id) REFERENCES cooking_process(id_process) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_tempdata_process_ts ON temperature_data(process_id, ts);
+
+
+-- ============================================================
+--  11. Users (Authentication & Authorization)
+-- ============================================================
+
+CREATE TABLE users (
+    id_user        SERIAL PRIMARY KEY,
+    email          TEXT NOT NULL UNIQUE,
+    password_hash  TEXT,
+    full_name      TEXT NOT NULL,
+    provider       TEXT NOT NULL CHECK (provider IN ('local','google')),
+    google_id      TEXT UNIQUE,
+    is_active      BOOLEAN DEFAULT TRUE,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_google_id ON users(google_id);
+
+
+-- ============================================================
+--  3. Thermal Frames MLX90640 (Per-Process Thermal Images)
+-- ============================================================
+
+CREATE TABLE thermal_frames (
+    id              SERIAL PRIMARY KEY,
+    process_id      INTEGER NOT NULL,
+    sample_uuid     TEXT NOT NULL UNIQUE,
+    ts              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    shape_rows      SMALLINT NOT NULL DEFAULT 24,
+    shape_cols      SMALLINT NOT NULL DEFAULT 32,
+    min_c           REAL NOT NULL,
+    max_c           REAL NOT NULL,
+    encoding        TEXT NOT NULL DEFAULT 'int16_norm_v1',
+    frame_blob      BYTEA NOT NULL,
+    FOREIGN KEY (process_id) REFERENCES cooking_process(id_process) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_frames_process_ts ON thermal_frames(process_id, ts);
+
+
+
+-- ============================================================
+--  4. Cooling System Configurations (history of configs)
+--  ✅ Added is_active to support Activate/Deactivate UI
+-- ============================================================
+
+CREATE TABLE air_cooling_configurations (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    temp_min REAL NOT NULL,
+    temp_max REAL NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,  -- ✅ NEW
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ✅ Helpful index for listing (active first)
+CREATE INDEX idx_air_cooling_active ON air_cooling_configurations(is_active);
+
+-- ✅ Enforce only one active configuration at a time (Postgres)
+CREATE UNIQUE INDEX one_active_air_cooling_config
+ON air_cooling_configurations ((is_active))
+WHERE is_active = true;
+
+
+
+-- ============================================================
+--  6. Cooling Events Log (relay / turbine history)
+-- ============================================================
+
+CREATE TABLE cooling_events (
+    id           SERIAL PRIMARY KEY,
+    process_id   INTEGER NOT NULL,
+    ts           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    action       TEXT NOT NULL CHECK (action IN ('ON','OFF','ALARM')),
+    ambient_c    REAL,
+    product_c    REAL,
+    device_id    TEXT,
+    source       TEXT DEFAULT 'auto' CHECK (source IN ('auto','manual')),
+    FOREIGN KEY (process_id) REFERENCES cooking_process(id_process) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_cooling_events_process_ts ON cooling_events(process_id, ts);
+
+-- ============================================================
+--  7. Ovens (Hornos físicos)
+-- ============================================================
+
+CREATE TABLE ovens (
+    id_oven        SERIAL PRIMARY KEY,
+    name           VARCHAR(100) NOT NULL,
+    location       TEXT,
+    description    TEXT,
+    is_active      BOOLEAN DEFAULT TRUE,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_ovens_active ON ovens(is_active);
+
+
+
+-- ============================================================
+--  8. Devices (Dispositivos IoT)
+-- ============================================================
+
+CREATE TABLE devices (
+    id_device      SERIAL PRIMARY KEY,
+    device_uid     VARCHAR(100) NOT NULL UNIQUE,
+    device_type    TEXT NOT NULL CHECK (device_type IN ('esp32','raspberry','jetson','other')),
+    model          TEXT,
+    firmware_ver   TEXT,
+    notes          TEXT,
+    is_active      BOOLEAN DEFAULT TRUE,
+    last_seen      TIMESTAMP,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_devices_uid ON devices(device_uid);
+
+
+
+-- ============================================================
+--  9. Device ↔ Oven Mapping (Escalable y flexible)
+-- ============================================================
+
+CREATE TABLE oven_device_mapping (
+    id              SERIAL PRIMARY KEY,
+    oven_id         INTEGER NOT NULL,
+    device_id       INTEGER NOT NULL,
+    assigned_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    unassigned_at   TIMESTAMP,
+    is_active       BOOLEAN DEFAULT TRUE,
+    FOREIGN KEY (oven_id) REFERENCES ovens(id_oven),
+    FOREIGN KEY (device_id) REFERENCES devices(id_device)
+);
+
+CREATE INDEX idx_oven_device_active
+ON oven_device_mapping(oven_id, device_id, is_active);
+
+
+
+-- ============================================================
+--  10. Device Activity Log (opcional – valor tesis)
+-- ============================================================
+
+CREATE TABLE device_activity_log (
+    id           SERIAL PRIMARY KEY,
+    device_id    INTEGER NOT NULL,
+    ts           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    event_type   TEXT NOT NULL CHECK (event_type IN ('CONNECTED','DISCONNECTED','ERROR','DATA_SENT')),
+    description  TEXT,
+    FOREIGN KEY (device_id) REFERENCES devices(id_device)
+);
+
+CREATE INDEX idx_device_activity_ts ON device_activity_log(device_id, ts);
+
+
+
+-- ============================================================
+--  End of Scalability Extension (Non-destructive)
+-- ============================================================
+
+
+-- ============================================================
+--  Finished Schema – Ready for CookEye Backend
+-- ============================================================
+-- ============================================================
+--  Pruebas y revisiones
+-- ============================================================
+
+select * from air_cooling_configurations;
+select * from cooking_process;
+SELECT * FROM cooking_process WHERE id_process = 1;
+select * from users;
+update table cooking_process with status = "completed";
+select * from temperature_data;
+TRUNCATE TABLE temperature_data RESTART IDENTITY CASCADE;
+SELECT process_id, product_c, ambient_c,  ts
+FROM temperature_data
+ORDER BY ts ASC;
+
+
+
+select * from temperature_data where process_id=1;
+select * from thermal_frames;
